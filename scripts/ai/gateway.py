@@ -27,15 +27,12 @@ from scripts.config import (
 )
 
 # --------------------------------------------------------------------------- #
-#  模型路由：便宜模型做过滤，强模型做 prep                                        #
+#  模型路由：便宜模型做过滤/聚类，强模型做 prep。                                   #
+#  配置驱动 —— DEEPSEEK_MODEL / DEEPSEEK_PREP_MODEL 覆盖，避免上游改名后写死失效。   #
 # --------------------------------------------------------------------------- #
-_ROUTER: dict[str, str] = {
-    "filter":  "deepseek-chat",
-    "cluster": "deepseek-chat",
-    "answer":  "deepseek-chat",
-    "vision":  "deepseek-chat",   # DeepSeek-VL via same endpoint
-    "prep":    "deepseek-chat",   # upgrade to deepseek-reasoner if available
-}
+def _model_for(task: str) -> str:
+    from scripts.config import deepseek_model, deepseek_prep_model
+    return deepseek_prep_model() if task == "prep" else deepseek_model()
 
 # --------------------------------------------------------------------------- #
 #  成本统计（内存，进程级）                                                       #
@@ -141,7 +138,7 @@ def chat_json(
         if cache_key in cache:
             return cache[cache_key]
 
-    model = _ROUTER.get(task, deepseek_model())
+    model = _model_for(task)
     body = {
         "model": model,
         "messages": [
