@@ -1110,7 +1110,7 @@ def test_agent_cluster_merges_variants(monkeypatch):
         Question(text="请做个自我介绍", freq=1),
     ]
 
-    def fake(system, user):
+    def fake(system, user, **_):
         if "参考" in system or "answers" in user:
             return {"answers": [{"id": "0", "answer": "要点1"}]}
         return {
@@ -1131,7 +1131,7 @@ def test_enrich_answers_attaches_text(monkeypatch):
     monkeypatch.setenv("INTERVIEWRADAR_CACHE_DIR", "/tmp/ir-test-cache")
     qs = [Question(text="Hive 分区表怎么设计？", freq=1, topic="Hive/SQL")]
 
-    def fake(system, user):
+    def fake(system, user, **_):
         return {"answers": [{"id": "0", "answer": "按天分区 + 生命周期"}]}
 
     monkeypatch.setattr("scripts.corpus.ai_gate.chat_json", fake)
