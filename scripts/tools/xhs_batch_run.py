@@ -19,7 +19,10 @@ from scripts.scrape.scrape_health import NEXT_STEP_XHS_AUTH, record
 from scripts.scrape.scrape_state import load_scrape_state, save_scrape_state
 from scripts.scrape.xhs_export import run_safe_xhs_scrape
 
-_BATCH = 35  # 单轮词数（实测 30 内安全，35 留少量余量）
+def _batch_size() -> int:
+    """单轮词数，读 XHS_MAX_KEYWORDS_PER_RUN（默认 35）；账号受限时调小。"""
+    from scripts.config import xhs_max_keywords_per_run
+    return xhs_max_keywords_per_run()
 
 
 def _next_keywords(state: dict, role_id: str, pool: list[str], n: int) -> list[str]:
@@ -37,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     pool = xhs_keywords_for_role(role_id, companies)
 
     state = load_scrape_state()
-    batch = _next_keywords(state, role_id, pool, _BATCH)
+    batch = _next_keywords(state, role_id, pool, _batch_size())
     if not batch:
         print("关键词池为空"); return 0
 
