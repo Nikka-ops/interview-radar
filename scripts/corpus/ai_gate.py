@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -110,9 +112,13 @@ def clear_agent_caches() -> list[str]:
     return removed
 
 
-def chat_json(system: str, user: str) -> dict | None:
+def chat_json(system: str, user: str, *, cache_key: str | None = None) -> dict | None:
     from scripts.ai.gateway import chat_json as _gw_chat
-    return _gw_chat(system, user, task="filter")
+    return _gw_chat(
+        system, user, task="filter",
+        cache_key=cache_key,
+        cache_name="cluster_cache" if cache_key else None,
+    )
 
 
 def _post_key(url: str, blob: str) -> str:
@@ -230,17 +236,22 @@ def cached_post_keep(url: str, blob: str) -> bool | None:
 
 
 def _merge_batch(batch: list[tuple[int, Question]]) -> list[Question]:
-    data = chat_json(_CLUSTER_SYS, json.dumps([{"id": str(i), "text": q.text[:280]} for i, q in batch], ensure_ascii=False))
+    # 用批次内的局部 id（0..n-1）编号：payload 只取决于题目文本本身，
+    # 与全局位置无关 → 跨重建相同题目直接命中 cluster 缓存，不重复烧 token。
+    qs = [q for _, q in batch]
+    payload = json.dumps([{"id": str(i), "text": q.text[:280]} for i, q in enumerate(qs)], ensure_ascii=False)
+    cache_key = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    data = chat_json(_CLUSTER_SYS, payload, cache_key=cache_key)
     if not data:
         print(
-            f"[ai_gate] cluster batch of {len(batch)} questions returned no AI data; "
+            f"[ai_gate] cluster batch of {len(qs)} questions returned no AI data; "
             "passing through unmerged (check DEEPSEEK_API_KEY/network).",
             file=sys.stderr,
         )
-        return [q for _, q in batch]
+        return qs
 
     drop = {int(x) for x in (data.get("drop") or []) if str(x).isdigit()}
-    by_id = {i: q for i, q in batch}
+    by_id = {i: q for i, q in enumerate(qs)}
     used: set[int] = set()
     out: list[Question] = []
 
@@ -271,10 +282,21 @@ def _merge_batch(batch: list[tuple[int, Question]]) -> list[Question]:
                 merged.answer = o.answer
         out.append(merged)
 
-    for i, q in batch:
+    for i, q in enumerate(qs):
         if i not in used and i not in drop:
             out.append(q)
     return out
+
+
+# 聚类批次并发数。DeepSeek 为付费 API（非受限抓取账号），并发安全；
+# 真实题目每批要 20-40s，串行几十批会拖到 1 小时，并发后压到几分钟。
+# 可用 AI_CLUSTER_WORKERS 覆盖。
+def _cluster_workers() -> int:
+    try:
+        n = int(os.environ.get("AI_CLUSTER_WORKERS", "12"))
+    except ValueError:
+        n = 12
+    return max(1, n)
 
 
 def _cluster_pass(questions: list[Question], *, batch_size: int) -> tuple[list[Question], bool]:
@@ -283,11 +305,16 @@ def _cluster_pass(questions: list[Question], *, batch_size: int) -> tuple[list[Q
     if len(indexed) > batch_size * 2:
         indexed = list(enumerate(merge_similar_questions(questions, threshold=0.55)))
 
+    batches = [indexed[start : start + batch_size] for start in range(0, len(indexed), batch_size)]
     merged: list[Question] = []
-    for start in range(0, len(indexed), batch_size):
-        if start:
-            time.sleep(0.15)
-        merged.extend(_merge_batch(indexed[start : start + batch_size]))
+    if len(batches) <= 1:
+        for b in batches:
+            merged.extend(_merge_batch(b))
+    else:
+        # 并发跑各批的 DeepSeek 合并；pool.map 保持输入顺序，结果确定。
+        with ThreadPoolExecutor(max_workers=min(_cluster_workers(), len(batches))) as pool:
+            for part in pool.map(_merge_batch, batches):
+                merged.extend(part)
     result = dedupe_and_rank(merged) if merged else questions
     return result, len(indexed) > batch_size
 
