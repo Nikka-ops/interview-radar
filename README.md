@@ -71,10 +71,17 @@ python3.11 -m venv .venv
 # AI 过滤 / 题目聚类 / 生成解答（不配则基础模式）
 DEEPSEEK_API_KEY=sk-xxxxxxxx
 DEEPSEEK_API_BASE=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-flash        # 便宜模型：过滤 / 聚类 / 答案
+DEEPSEEK_PREP_MODEL=deepseek-v4-pro     # 强模型：模拟面试 prep（可选）
+# 模型名配置驱动：上游若再改名，只改这里即可，无需动代码
+
+# 题库聚类的 DeepSeek 并发数（可选，默认 12；DeepSeek 为付费 API，并发安全）
+AI_CLUSTER_WORKERS=12
 
 # 小红书抓取（可选，见「数据源与抓取」）
 XHS_DRIVER=playwright
+# 单轮抓取词数上限（护账号降频用，默认 35）
+XHS_MAX_KEYWORDS_PER_RUN=35
 
 # 图片帖视觉兜底（可选，OCR 读不出时调用）
 VISION_API_KEY=
@@ -209,9 +216,10 @@ corpus_cache/                 运行时数据（题库 / 岗位快照 / 图片�
 
 ## 🎯 设计原则
 
-1. **AI First** — 能用 DeepSeek 解决的判断（筛帖 / 归类 / 去重 / 解答）不写死规则，正则只作离线兜底。
+1. **AI First** — 能用 DeepSeek 解决的判断（筛帖 / 归类 / 去重 / 解答）不写死规则，正则只作离线兜底；模型名配置驱动，上游改名不影响代码。
 2. **复用开源** — OCR→RapidOCR · 相似度→rapidfuzz · 浏览器→Playwright / DrissionPage，不造轮子。
 3. **增量优先 & 韧性** — 抓取全程增量去重；失败优雅降级、状态可见、绝不用空结果覆盖好数据。
+4. **并发 + 缓存降本** — 过滤与题目聚类的 DeepSeek 调用并发执行（深度重建从 1 小时压到几分钟）；聚类结果按题目内容缓存，重建只算新增批次，token 消耗大幅下降。
 
 ---
 
