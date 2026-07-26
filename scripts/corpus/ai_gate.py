@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -277,17 +279,33 @@ def _merge_batch(batch: list[tuple[int, Question]]) -> list[Question]:
     return out
 
 
+# 聚类批次并发数。DeepSeek 为付费 API（非受限抓取账号），并发安全；
+# 真实题目每批要 20-40s，串行几十批会拖到 1 小时，并发后压到几分钟。
+# 可用 AI_CLUSTER_WORKERS 覆盖。
+def _cluster_workers() -> int:
+    try:
+        n = int(os.environ.get("AI_CLUSTER_WORKERS", "12"))
+    except ValueError:
+        n = 12
+    return max(1, n)
+
+
 def _cluster_pass(questions: list[Question], *, batch_size: int) -> tuple[list[Question], bool]:
     """Returns (merged_questions, spanned_multiple_batches)."""
     indexed = list(enumerate(questions))
     if len(indexed) > batch_size * 2:
         indexed = list(enumerate(merge_similar_questions(questions, threshold=0.55)))
 
+    batches = [indexed[start : start + batch_size] for start in range(0, len(indexed), batch_size)]
     merged: list[Question] = []
-    for start in range(0, len(indexed), batch_size):
-        if start:
-            time.sleep(0.15)
-        merged.extend(_merge_batch(indexed[start : start + batch_size]))
+    if len(batches) <= 1:
+        for b in batches:
+            merged.extend(_merge_batch(b))
+    else:
+        # 并发跑各批的 DeepSeek 合并；pool.map 保持输入顺序，结果确定。
+        with ThreadPoolExecutor(max_workers=min(_cluster_workers(), len(batches))) as pool:
+            for part in pool.map(_merge_batch, batches):
+                merged.extend(part)
     result = dedupe_and_rank(merged) if merged else questions
     return result, len(indexed) > batch_size
 
