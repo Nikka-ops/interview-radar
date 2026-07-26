@@ -112,9 +112,13 @@ def clear_agent_caches() -> list[str]:
     return removed
 
 
-def chat_json(system: str, user: str) -> dict | None:
+def chat_json(system: str, user: str, *, cache_key: str | None = None) -> dict | None:
     from scripts.ai.gateway import chat_json as _gw_chat
-    return _gw_chat(system, user, task="filter")
+    return _gw_chat(
+        system, user, task="filter",
+        cache_key=cache_key,
+        cache_name="cluster_cache" if cache_key else None,
+    )
 
 
 def _post_key(url: str, blob: str) -> str:
@@ -232,17 +236,22 @@ def cached_post_keep(url: str, blob: str) -> bool | None:
 
 
 def _merge_batch(batch: list[tuple[int, Question]]) -> list[Question]:
-    data = chat_json(_CLUSTER_SYS, json.dumps([{"id": str(i), "text": q.text[:280]} for i, q in batch], ensure_ascii=False))
+    # 用批次内的局部 id（0..n-1）编号：payload 只取决于题目文本本身，
+    # 与全局位置无关 → 跨重建相同题目直接命中 cluster 缓存，不重复烧 token。
+    qs = [q for _, q in batch]
+    payload = json.dumps([{"id": str(i), "text": q.text[:280]} for i, q in enumerate(qs)], ensure_ascii=False)
+    cache_key = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    data = chat_json(_CLUSTER_SYS, payload, cache_key=cache_key)
     if not data:
         print(
-            f"[ai_gate] cluster batch of {len(batch)} questions returned no AI data; "
+            f"[ai_gate] cluster batch of {len(qs)} questions returned no AI data; "
             "passing through unmerged (check DEEPSEEK_API_KEY/network).",
             file=sys.stderr,
         )
-        return [q for _, q in batch]
+        return qs
 
     drop = {int(x) for x in (data.get("drop") or []) if str(x).isdigit()}
-    by_id = {i: q for i, q in batch}
+    by_id = {i: q for i, q in enumerate(qs)}
     used: set[int] = set()
     out: list[Question] = []
 
@@ -273,7 +282,7 @@ def _merge_batch(batch: list[tuple[int, Question]]) -> list[Question]:
                 merged.answer = o.answer
         out.append(merged)
 
-    for i, q in batch:
+    for i, q in enumerate(qs):
         if i not in used and i not in drop:
             out.append(q)
     return out
