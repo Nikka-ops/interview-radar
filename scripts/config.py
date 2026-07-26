@@ -426,7 +426,14 @@ def deepseek_api_base() -> str:
 
 
 def deepseek_model() -> str:
-    return os.environ.get("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
+    return os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash").strip() or "deepseek-v4-flash"
+
+
+def deepseek_prep_model() -> str:
+    """强模型做 prep（默认 v4-pro）；未配置则回退到通用模型。"""
+    return (os.environ.get("DEEPSEEK_PREP_MODEL", "").strip()
+            or os.environ.get("DEEPSEEK_MODEL", "").strip()
+            or "deepseek-v4-pro")
 
 
 def vision_api_key() -> str:
