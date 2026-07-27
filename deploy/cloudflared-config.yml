@@ -1,0 +1,16 @@
+# Cloudflare 隧道配置 —— 放到 /etc/cloudflared/config.yml
+# 把 <TUNNEL_ID> 换成 `cloudflared tunnel create interview-radar` 输出的隧道 ID，
+# credentials-file 换成它生成的 json 路径（通常在 ~/.cloudflared/<TUNNEL_ID>.json）。
+
+tunnel: interview-radar
+credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # 你的域名 → 本地网页服务
+  - hostname: interviewhelper.xyz
+    service: http://localhost:8765
+  # www 也想用的话解开下面两行
+  # - hostname: www.interviewhelper.xyz
+  #   service: http://localhost:8765
+  # 兜底：其它请求一律 404
+  - service: http_status:404
