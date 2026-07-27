@@ -1,0 +1,22 @@
+[Unit]
+Description=InterviewRadar Web (面试雷达网页)
+After=network.target
+
+[Service]
+# ↓↓↓ 按你的实际情况改这三处 ↓↓↓
+User=ubuntu
+WorkingDirectory=/home/ubuntu/interview-radar
+Environment=WEB_AUTH_USER=admin
+Environment=WEB_AUTH_PASS=CHANGE_ME_到一个强密码
+Environment=DEEPSEEK_API_KEY=sk-换成你的key
+Environment=DEEPSEEK_API_BASE=https://api.deepseek.com
+Environment=DEEPSEEK_MODEL=deepseek-v4-flash
+Environment=DEEPSEEK_PREP_MODEL=deepseek-v4-pro
+# ↑↑↑ 改完保存 ↑↑↑
+
+ExecStart=/home/ubuntu/interview-radar/.venv/bin/python -m scripts.api.server --host 127.0.0.1 --port 8765
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

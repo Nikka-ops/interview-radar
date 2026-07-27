@@ -1,8 +1,11 @@
 """Lightweight JSON HTTP API + static Web UI for InterviewRadar."""
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import mimetypes
+import os
 import time as _time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -994,11 +997,42 @@ def handle_request(method: str, path: str, body: dict | None = None) -> tuple[in
     return 404, {"error": "not_found", "path": route}
 
 
+def _auth_required() -> tuple[str, str] | None:
+    """公网访问用的 Basic Auth。设了 WEB_AUTH_PASS 才启用；本地默认不启用。"""
+    pw = os.environ.get("WEB_AUTH_PASS", "")
+    if not pw:
+        return None
+    return os.environ.get("WEB_AUTH_USER", "admin"), pw
+
+
 class InterviewRadarHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
         return
 
+    def _check_auth(self) -> bool:
+        """未配置密码时放行；配置了则校验 Authorization: Basic。"""
+        cred = _auth_required()
+        if cred is None:
+            return True
+        want_user, want_pass = cred
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Basic "):
+            try:
+                user, _, pw = base64.b64decode(header[6:]).decode("utf-8").partition(":")
+            except Exception:  # noqa: BLE001
+                user = pw = ""
+            # 常量时间比较，避免时序侧信道
+            if hmac.compare_digest(user, want_user) and hmac.compare_digest(pw, want_pass):
+                return True
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="InterviewRadar"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return False
+
     def do_GET(self) -> None:  # noqa: N802
+        if not self._check_auth():
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/api/proxy-image":
             _proxy_image_response(self, parsed)
@@ -1023,6 +1057,8 @@ class InterviewRadarHandler(BaseHTTPRequestHandler):
             _json_response(self, 500, {"error": "internal_error", "message": str(exc)})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._check_auth():
+            return
         try:
             body = _read_json(self)
             status, payload = handle_request("POST", self.path, body)
