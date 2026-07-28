@@ -1010,11 +1010,37 @@ class InterviewRadarHandler(BaseHTTPRequestHandler):
         return
 
     def _check_auth(self) -> bool:
-        """未配置密码时放行；配置了则校验 Authorization: Basic。"""
+        """未配置密码时放行；否则支持三种方式：Cookie、URL 参数 ?k=、Basic Auth。
+
+        微信/QQ 等 App 内置浏览器不弹 Basic Auth 登录框，故提供 ?k=<密码> 免弹窗
+        入口：校验通过即种 Cookie 并跳到干净地址，之后整站请求靠 Cookie 放行。
+        """
         cred = _auth_required()
         if cred is None:
             return True
         want_user, want_pass = cred
+
+        # 1) Cookie（首次 ?k= 访问后种下，App 内置浏览器靠它）
+        for part in self.headers.get("Cookie", "").split(";"):
+            part = part.strip()
+            if part.startswith("ir_auth=") and hmac.compare_digest(part[8:], want_pass):
+                return True
+
+        # 2) URL 参数 ?k=<密码>：通过则种 Cookie 并 302 到无参地址
+        parsed = urlparse(self.path)
+        key = (parse_qs(parsed.query).get("k") or [""])[0]
+        if key and hmac.compare_digest(key, want_pass):
+            self.send_response(302)
+            self.send_header(
+                "Set-Cookie",
+                f"ir_auth={want_pass}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax",
+            )
+            self.send_header("Location", parsed.path or "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
+        # 3) HTTP Basic Auth（桌面浏览器）
         header = self.headers.get("Authorization", "")
         if header.startswith("Basic "):
             try:
