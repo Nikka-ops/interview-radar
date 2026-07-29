@@ -17,6 +17,29 @@ _OCR_PAGE_LABEL = re.compile(r"\[图片 OCR 第\s*\d+\s*页\]\s*\n?", re.I)
 _BROKEN_NC_MOMENT = re.compile(r"nowcoder\.com/feed/detail/\d+", re.I)
 _HTTP_URL = re.compile(r"^https?://", re.I)
 
+# 手机截图 OCR 常混入的界面噪音:状态栏、时间、导航、水印 —— 独占一行时丢弃。
+_NOISE_TIME = re.compile(r"^\d{1,2}[:：]\d{2}\s*[A-Za-z%]{0,2}$")      # 15:49 / 11:51C
+_NOISE_STATUSBAR = re.compile(r"^[\d\s]*\d\s*[GK]?\s*(?:\d|[GK%]|5G|4G|LTE|Wi-?Fi|全网通|中国\S{0,4})[\d\sGK%]*$", re.I)  # 05G 5G 77 / 100%
+_NOISE_NAV = re.compile(r"^[\s<>〈〉‹›❮❯←→‹›·\.。、,，:：;；|/\\\-—_\d]{1,4}$")   # 孤立导航符/短标点
+# 单字符图标 OCR(点赞/箭头/方块等),独占一行时丢弃
+_NOISE_ICON = re.compile(r"^[凸凹口回目▢◇◆●○◎△▽☆★※✓✗×＋+♡♥❤👍←→↑↓⌂☰⋯…]$")
+_NOISE_WATERMARK = re.compile(r"(面经笔顶|笔记灵感|点击查看|长按识别|扫码|@[\w一-鿿]{1,12}的小红书)")
+_NOISE_EXACT = {"面经笔顶", "小红书", "关注", "分享", "点赞", "收藏", "评论", "返回"}
+
+
+def _is_noise_line(line: str) -> bool:
+    """判断一行是否为截图界面噪音(状态栏/时间/导航/水印),真内容不误伤。"""
+    s = line.strip()
+    if not s:
+        return False
+    if s in _NOISE_EXACT:
+        return True
+    if _NOISE_TIME.match(s) or _NOISE_NAV.match(s) or _NOISE_ICON.match(s):
+        return True
+    if len(s) <= 10 and _NOISE_STATUSBAR.match(s):
+        return True
+    return False
+
 
 def clean_post_text(text: str) -> str:
     """Remove hashtags, HTML, OCR page labels, and noisy link fragments."""
@@ -27,6 +50,7 @@ def clean_post_text(text: str) -> str:
     t = _HTML_TAG.sub("", t)
     t = _TOPIC_HASHTAG.sub("", t)
     t = _PLAIN_HASHTAG.sub("", t)
+    t = _NOISE_WATERMARK.sub("", t)
     lines = []
     for line in t.splitlines():
         line = line.strip()
@@ -35,6 +59,9 @@ def clean_post_text(text: str) -> str:
             continue
         # drop lines that are only leftover tags / punctuation
         if re.fullmatch(r"[\s#，,、/|]+", line):
+            continue
+        # drop 手机截图界面噪音(状态栏 / 时间 / 导航 / 水印)
+        if _is_noise_line(line):
             continue
         lines.append(line)
     # collapse 3+ blank lines to 1

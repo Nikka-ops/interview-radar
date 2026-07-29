@@ -1272,10 +1272,8 @@ button.secondary {
   line-height: 1.45; padding-right: 36px; letter-spacing: -0.3px;
 }
 .modal-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; }
-.modal-cover {
-  height: 80px; border-radius: var(--radius); margin-bottom: 12px;
-  background: linear-gradient(135deg, var(--indigo-soft) 0%, var(--border) 100%);
-}
+/* 去掉装饰性空渐变条（像坏图，无信息量）；只在有真实封面图时才显示图片本身 */
+.modal-cover { display: none; }
 
 .modal-content {
   font-size: 13px; line-height: 1.7; color: var(--text);
