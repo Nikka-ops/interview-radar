@@ -48,7 +48,13 @@ def _browser_output_dir() -> Path:
 
 
 def _search_url(keyword: str) -> str:
-    return f"https://www.xiaohongshu.com/search_result?keyword={quote(keyword)}&source=web_explore_feed"
+    # 默认综合排序只返回稳定的热门老帖(增量抓总是 0 新增);
+    # XHS_SORT=time 时按最新时间排序,优先捞"上次到今天"的新面经。
+    import os
+    base = f"https://www.xiaohongshu.com/search_result?keyword={quote(keyword)}&source=web_explore_feed"
+    if os.environ.get("XHS_SORT", "").strip().lower() in ("time", "latest", "new", "time_descending"):
+        base += "&sort=time_descending"
+    return base
 
 
 def _extract_dom_cards(page) -> list[dict]:
