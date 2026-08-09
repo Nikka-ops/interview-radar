@@ -57,6 +57,46 @@ def _search_url(keyword: str) -> str:
     return base
 
 
+def _sort_latest_enabled() -> bool:
+    import os
+    return os.environ.get("XHS_SORT", "").strip().lower() in ("time", "latest", "new", "time_descending")
+
+
+def _scroll_rounds() -> int:
+    """滚屏次数,越多抓得越深(默认 3);XHS_SCROLL_ROUNDS 可调。"""
+    import os
+    try:
+        return max(1, int(os.environ.get("XHS_SCROLL_ROUNDS", "3")))
+    except ValueError:
+        return 3
+
+
+def _click_sort_latest(page) -> None:
+    """搜索结果页点击「最新」排序标签(URL sort 参数 XHS SPA 不认,必须点 UI)。
+    最新排序常藏在「综合」下拉里,先展开再点;全程 best-effort,点不到就退回综合。"""
+    js_click_latest = """() => {
+        const hit = [...document.querySelectorAll('span,div,button,li,a')]
+          .find(e => (e.textContent||'').trim() === '最新' && e.children.length === 0);
+        if (hit) { hit.click(); return true; }
+        return false;
+    }"""
+    js_open_dropdown = """() => {
+        const el = [...document.querySelectorAll('span,div,button,li,a')]
+          .find(e => (e.textContent||'').trim() === '综合' && e.children.length === 0);
+        if (el) { el.click(); return true; }
+        return false;
+    }"""
+    try:
+        if page.evaluate(js_click_latest):
+            page.wait_for_timeout(2500); return
+        if page.evaluate(js_open_dropdown):
+            page.wait_for_timeout(1200)
+            page.evaluate(js_click_latest)
+            page.wait_for_timeout(2500)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _extract_dom_cards(page) -> list[dict]:
     rows = page.evaluate(
         """
@@ -221,7 +261,12 @@ class PlaywrightXHSDriver:
                                 "小红书弹出人机验证（频率触发）。请在专用 Chrome 手动完成验证，"
                                 "并降低抓取频次/单次词数后重试。"
                             )
-                        for _ in range(3):
+                        # 综合排序只返回稳定热门老帖,增量总是 0 新增;点"最新"标签
+                        # 按时间排序,才能抓到"上次到今天"新发布的面经(XHS_SORT=time 时启用)。
+                        if _sort_latest_enabled():
+                            _click_sort_latest(page)
+                        # 多滚几屏加载更多结果(越过前排热门,捞到更新/更冷门的帖)
+                        for _ in range(_scroll_rounds()):
                             page.mouse.wheel(0, random.randint(2200, 3400))
                             page.wait_for_timeout(random.randint(1500, 2600))
                         page.remove_listener("response", _on_response)
